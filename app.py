@@ -1,12 +1,12 @@
+import os
 from flask import Flask, request, jsonify, render_template_string
 
 app = Flask(__name__)
 
 # ── HTML_PAGE ─────────────────────────────────────────────────────────────────
-# Served at http://127.0.0.1:5000/
-# Identical design to index.html — same card, same button, same result colours.
-# fetch uses a relative URL ('/check') so the Referer header reads "http://..."
-# which Flask logs as (local ip).
+# Served at your Railway public URL e.g. https://odd-even.up.railway.app/
+# fetch() uses relative URL '/check' — works on localhost AND Railway
+# with zero code changes between environments.
 HTML_PAGE = '''
 <!DOCTYPE html>
 <html lang="en">
@@ -60,13 +60,21 @@ HTML_PAGE = '''
       min-height: 2rem;
     }
     #result.error { color: #e53935; }
+
+    /* ── Credit line ──────────────────────────────────────────────────────── */
+    .credit {
+      margin-top: 2rem;
+      font-size: 0.75rem;
+      color: #aaa;
+      letter-spacing: 0.03em;
+    }
   </style>
 </head>
 <body>
   <div class="card">
     <h2>Odd or Even?</h2>
 
-    <!-- Enter key also triggers check -->
+    <!-- Enter key also triggers the check -->
     <input
       type="number"
       id="numberInput"
@@ -76,8 +84,11 @@ HTML_PAGE = '''
 
     <button onclick="checkNumber()">Check</button>
 
-    <!-- Result text injected here -->
+    <!-- Result injected here by JS -->
     <div id="result"></div>
+
+    <!-- Credit line -->
+    <p class="credit">Created by DURAIARASU SIVARASU</p>
   </div>
 
   <script>
@@ -95,8 +106,8 @@ HTML_PAGE = '''
       const num = parseInt(input.value, 10);
 
       try {
-        // Relative URL — Referer will be "http://127.0.0.1:5000/"
-        // Flask reads this and logs it as (local ip)
+        // Relative URL — no hardcoded localhost
+        // works on local AND Railway without any change
         const response = await fetch('/check', {
           method:  'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -112,7 +123,7 @@ HTML_PAGE = '''
 
       } catch (err) {
         resultDiv.className   = 'error';
-        resultDiv.textContent = 'Could not reach the server. Is Flask running?';
+        resultDiv.textContent = 'Could not reach the server.';
         console.error(err);
       }
     }
@@ -123,8 +134,7 @@ HTML_PAGE = '''
 
 
 # ── CORS ──────────────────────────────────────────────────────────────────────
-# Allows index.html opened via file:// to POST to this server.
-# Without this header, browsers block cross-origin requests from file:// pages.
+# Allows standalone index.html (file://) to POST to this server.
 @app.after_request
 def add_cors(response):
     response.headers["Access-Control-Allow-Origin"]  = "*"
@@ -134,22 +144,23 @@ def add_cors(response):
 
 
 # ── Helper: identify request origin from Referer header ───────────────────────
-# Browser sets Referer automatically on every fetch() call:
-#   file:///C:/Users/.../index.html  →  "index.html request"
-#   http://127.0.0.1:5000/           →  "local ip"
-#   no Referer (curl, Postman, etc.) →  "direct"
+# file://       → standalone index.html opened from disk
+# 127.0.0.1     → local Flask server
+# railway.app   → live Railway deployment
+# (blank)       → direct call via Postman / curl
 def get_source_label():
     referer = request.headers.get("Referer", "")
     if referer.startswith("file://"):
-        return "HTML REQUEST"
-    elif referer.startswith("http://"):
-        return "LOCAL IP"
-    return "DIRECT"
+        return "index.html request"
+    elif "127.0.0.1" in referer or "localhost" in referer:
+        return "local ip"
+    elif referer.startswith("https://"):
+        return "railway"
+    return "direct"
 
 
 # ── Route: GET / ──────────────────────────────────────────────────────────────
-# Renders HTML_PAGE when the browser visits http://127.0.0.1:5000/
-# render_template_string keeps everything in one file — no templates/ folder needed.
+# Returns the full HTML page — works on localhost AND Railway URL.
 @app.route("/")
 def home():
     return render_template_string(HTML_PAGE)
@@ -158,39 +169,37 @@ def home():
 # ── Route: POST /check ────────────────────────────────────────────────────────
 # ① Receives : { "number": <int> }
 # ② Computes : Even if divisible by 2 AND not zero, else Odd
-# ③ Logs     : number, result, and which client sent the request
+# ③ Logs     : number, result, source of request
 # ④ Returns  : { "number": <int>, "result": "Even" | "Odd" }
 @app.route("/check", methods=["POST", "OPTIONS"])
 def check_odd_even():
 
-    # ① Pre-flight OPTIONS — browser sends this before every cross-origin POST.
-    #    Return 204 No Content to confirm CORS is allowed, then browser sends the real POST.
+    # Pre-flight OPTIONS — browser sends before every cross-origin POST
     if request.method == "OPTIONS":
         return "", 204
 
-    # ② Parse JSON body — silent=True returns None instead of raising on bad JSON
+    # Parse JSON body — silent=True returns None instead of raising on bad JSON
     data = request.get_json(silent=True)
     if not data or "number" not in data:
         return jsonify({"error": "Missing 'number' field"}), 400
 
-    # ③ Compute Even / Odd
-    #    Logic: number % 2 == 0 AND number != 0  →  Even
-    #           everything else (including 0)    →  Odd
+    # Even/Odd logic (unchanged):
+    #   number % 2 == 0 AND number != 0  →  Even
+    #   everything else (including 0)    →  Odd
     number = int(data["number"])
     result = "Even" if number % 2 == 0 and number != 0 else "Odd"
 
-    # ④ Read Referer to label the log line
+    # Log with source label
     source = get_source_label()
-
-    # ⑤ Print enhanced log — appears directly below Flask's own access log line
     print(f"  └── Input: '{number}' → Result: {number} is {result}  ({source})")
 
-    # ⑥ Send JSON response back to the browser
     return jsonify({"result": result, "number": number})
 
 
 # ── Entry point ───────────────────────────────────────────────────────────────
-# debug=True  → auto-reloads on file save, shows full tracebacks in browser
-# port=5000   → http://127.0.0.1:5000/
+# Railway injects $PORT — must read it or deployment crashes.
+# Locally $PORT is not set, falls back to 5000.
+# host="0.0.0.0" makes the app reachable from outside (required on Railway).
 if __name__ == "__main__":
-    app.run(debug=True, port=5000)
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host="0.0.0.0", port=port)
