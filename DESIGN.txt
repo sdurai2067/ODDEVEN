@@ -1,0 +1,421 @@
+md file 
+
+# Odd or Even — How It All Works
+> Written for someone who just started learning Python. No jargon. Plain English.
+
+---
+
+## 🧠 The Big Picture (30 seconds)
+
+You have **two files**. They talk to each other over the internet (locally on your computer).
+
+```
+[ You type a number ]
+        │
+        ▼
+┌───────────────────┐        sends number        ┌─────────────────┐
+│   index.html      │  ─────────────────────────▶ │    app.py       │
+│  (the webpage)    │                             │  (the brain)    │
+│                   │  ◀─────────────────────────  │                 │
+└───────────────────┘      sends back Even/Odd    └─────────────────┘
+```
+
+- `index.html` = the **face** — what you see in the browser
+- `app.py` = the **brain** — does the actual Even/Odd math
+
+---
+
+## 🐍 app.py — Full Flow
+
+### What is app.py in plain English?
+
+Think of `app.py` as a **restaurant kitchen**.
+- The browser is the **customer**
+- `index.html` is the **waiter** who takes the order
+- `app.py` is the **kitchen** that cooks the answer and sends it back
+
+---
+
+### Step-by-step flow
+
+```
+python app.py
+      │
+      ▼
+Flask starts up
+"I am now listening at http://127.0.0.1:5000"
+      │
+      │
+      ├─────────────────────────────────────────────────────────┐
+      │                                                         │
+      ▼                                                         ▼
+Someone visits                                     Someone submits a number
+http://127.0.0.1:5000/                             via the Check button
+      │                                                         │
+      ▼                                                         ▼
+Route: GET /                                       Route: POST /check
+Flask sends back the HTML page                               │
+(the card with the input box)                                │
+                                              ┌──────────────┘
+                                              │
+                                              ▼
+                                   Is this an OPTIONS request?
+                                   (browser asking "is CORS ok?")
+                                        │           │
+                                       YES          NO
+                                        │           │
+                                        ▼           ▼
+                                   Reply 204    Read the number
+                                   (go ahead)   from JSON body
+                                                    │
+                                                    ▼
+                                         Is the number missing?
+                                              │        │
+                                             YES       NO
+                                              │        │
+                                              ▼        ▼
+                                         Send 400   Do the math:
+                                          error     number % 2 == 0
+                                                    AND number != 0 ?
+                                                        │        │
+                                                       YES       NO
+                                                        │        │
+                                                        ▼        ▼
+                                                      "Even"   "Odd"
+                                                        │        │
+                                                        └───┬────┘
+                                                            │
+                                                            ▼
+                                                  Read Referer header
+                                                  (who sent this?)
+                                                    │           │
+                                              file://...    http://...
+                                                    │           │
+                                                    ▼           ▼
+                                            "index.html    "local ip"
+                                              request"
+                                                    │           │
+                                                    └─────┬─────┘
+                                                          │
+                                                          ▼
+                                              Print log in terminal:
+                                         └── Input: '44' → 44 is Even (local ip)
+                                                          │
+                                                          ▼
+                                              Send JSON back to browser:
+                                              { number: 44, result: "Even" }
+```
+
+---
+
+### app.py — Code Sections Explained
+
+#### 1. Imports (the tools you borrow)
+
+```python
+from flask import Flask, request, jsonify, render_template_string
+```
+
+| Word | What it means in plain English |
+|------|-------------------------------|
+| `Flask` | The main engine. Like hiring a web server. |
+| `request` | Lets you peek at what the browser sent you. |
+| `jsonify` | Converts your Python answer into JSON so the browser can read it. |
+| `render_template_string` | Takes a big HTML string and sends it as a webpage. |
+
+---
+
+#### 2. HTML_PAGE (the webpage stored inside Python)
+
+```python
+HTML_PAGE = ''' ... big HTML here ... '''
+```
+
+> This is just a big piece of text stored in a variable.
+> When someone visits `/`, Flask sends this text to the browser.
+> The browser reads it and draws the card, input box, and button.
+
+---
+
+#### 3. CORS — the permission slip
+
+```python
+@app.after_request
+def add_cors(response):
+    response.headers["Access-Control-Allow-Origin"] = "*"
+```
+
+```
+Browser opens index.html from Downloads folder
+        │
+        │  tries to POST to http://127.0.0.1:5000/check
+        │
+        ▼
+Browser thinks: "Wait — this file is from file://
+                 but it's talking to http://...
+                 Is that allowed?"
+        │
+        ▼
+Flask replies: "Yes! CORS is open. Anyone can talk to me."
+        │
+        ▼
+Browser allows the request to go through ✅
+```
+
+> Without CORS, the browser would **block** the request from `index.html`
+> and you'd see a red error in the browser console.
+
+---
+
+#### 4. get_source_label() — the detective
+
+```python
+def get_source_label():
+    referer = request.headers.get("Referer", "")
+    if referer.startswith("file://"):
+        return "index.html request"
+    elif referer.startswith("http://"):
+        return "local ip"
+    return "direct"
+```
+
+```
+Every browser request carries a secret note called "Referer"
+It says: "Hey, I came from THIS page"
+
+file:///C:/Users/Downloads/index.html  →  label = "index.html request"
+http://127.0.0.1:5000/                 →  label = "local ip"
+No Referer (Postman, curl)             →  label = "direct"
+```
+
+> Think of it like a delivery driver's logbook.
+> Flask reads where the order came from and writes it in the terminal.
+
+---
+
+#### 5. The Even/Odd Logic
+
+```python
+result = "Even" if number % 2 == 0 and number != 0 else "Odd"
+```
+
+```
+What does  %  mean?
+% = remainder after division
+
+10 ÷ 2 = 5, remainder 0  →  Even ✅
+ 7 ÷ 2 = 3, remainder 1  →  Odd  ✅
+ 0 ÷ 2 = 0, remainder 0  →  BUT we say 0 is Odd (special rule) ✅
+```
+
+---
+
+## 🌐 index.html — Full Flow
+
+### What is index.html in plain English?
+
+Think of it as a **vending machine panel**.
+- You press a button (Check)
+- It talks to the machine behind the wall (app.py)
+- The result lights up on the screen
+
+---
+
+### Step-by-step flow
+
+```
+Browser opens index.html
+        │
+        ▼
+Page draws on screen:
+  ┌─────────────────────┐
+  │    Odd or Even?     │
+  │  [ Enter a number ] │
+  │      [ Check ]      │
+  │                     │
+  └─────────────────────┘
+        │
+        │  User types  44  and clicks Check
+        │
+        ▼
+checkNumber() function runs
+        │
+        ▼
+Is the input box empty?
+      │         │
+     YES        NO
+      │         │
+      ▼         ▼
+Show red     Parse the number
+"Please      as integer: 44
+enter a          │
+number."         ▼
+             Send POST request to
+             http://127.0.0.1:5000/check
+             with body: { "number": 44 }
+                 │
+                 │   (app.py does the math)
+                 │
+                 ▼
+             Got a response back?
+               │           │
+              YES           NO
+               │           │
+               ▼           ▼
+          response.ok?   Show red error:
+           │       │     "Could not reach
+          YES      NO     the server"
+           │       │
+           ▼       ▼
+       Parse JSON  Throw error
+       { number: 44,
+         result: "Even" }
+           │
+           ▼
+       result === "Even"?
+         │           │
+        YES          NO
+         │           │
+         ▼           ▼
+     colour =    colour =
+      green       orange
+         │           │
+         └─────┬─────┘
+               │
+               ▼
+       Show on screen:
+       "44 is Even"  ✅
+```
+
+---
+
+### index.html — Code Sections Explained
+
+#### 1. The Card (HTML structure)
+
+```
+<div class="card">          ← the white box
+  <h2>Odd or Even?</h2>     ← the title
+  <input ... />              ← where you type
+  <button>Check</button>     ← triggers the JS function
+  <div id="result"></div>    ← empty box, filled later by JS
+</div>
+```
+
+> The `<div id="result">` starts completely empty.
+> JavaScript writes into it after getting the answer from Flask.
+
+---
+
+#### 2. The fetch() call — how HTML talks to Python
+
+```javascript
+const response = await fetch('http://127.0.0.1:5000/check', {
+    method:  'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body:    JSON.stringify({ number: num }),
+});
+```
+
+```
+fetch()  =  "Go knock on Flask's door"
+
+method: POST     →  "I'm sending you something"
+headers          →  "It's in JSON format"
+body             →  "Here is the number: 44"
+
+await            →  "Wait here until Flask replies"
+```
+
+> `await` means JavaScript **pauses** here and waits.
+> It does NOT freeze your browser — other things still work.
+
+---
+
+#### 3. Why index.html uses absolute URL and app.py uses relative
+
+```
+index.html  (opened from Downloads)
+    fetch('http://127.0.0.1:5000/check')   ← MUST be full address
+                                              because the file has no server
+
+app.py's HTML  (served by Flask)
+    fetch('/check')                         ← short form works
+                                              because Flask is already the server
+```
+
+```
+It's like giving directions:
+
+If you're already inside the building:
+    "Go to Room 5"  ✅  (relative)
+
+If you're outside on the street:
+    "Go to 127 Main St, Room 5"  ✅  (absolute)
+```
+
+---
+
+## 📋 Log Output — What You See in Terminal
+
+```
+When index.html sends a request:
+──────────────────────────────────────────────────────────────
+127.0.0.1 - - [20/Jun/2026 11:06:57] "OPTIONS /check HTTP/1.1" 204 -
+  └── Input: '44' → Result: 44 is Even  (index.html request)
+127.0.0.1 - - [20/Jun/2026 11:06:57] "POST /check HTTP/1.1" 200 -
+
+
+When 127.0.0.1:5000 sends a request:
+──────────────────────────────────────────────────────────────
+127.0.0.1 - - [20/Jun/2026 11:07:17] "POST /check HTTP/1.1" 200 -
+  └── Input: '999' → Result: 999 is Odd  (local ip)
+```
+
+### What each part means
+
+```
+127.0.0.1                →  your own computer (localhost)
+[20/Jun/2026 11:06:57]   →  time of the request
+"OPTIONS /check"         →  browser asking "is CORS ok?"  (only from file://)
+"POST /check"            →  the actual number being sent
+204                      →  "Yes CORS is fine" reply code
+200                      →  "Here is your answer" reply code
+(index.html request)     →  came from the file:// HTML file
+(local ip)               →  came from http://127.0.0.1:5000/
+```
+
+---
+
+## 🗂️ File Structure
+
+```
+your-project/
+│
+├── app.py          ← Run this with:  python app.py
+│                     Opens at:       http://127.0.0.1:5000/
+│
+└── index.html      ← Open this by double-clicking it
+                      OR drag it into your browser
+                      Needs app.py running to work
+```
+
+---
+
+## ⚡ Quick Start
+
+```
+Step 1:  Open terminal
+Step 2:  python app.py
+Step 3:  You'll see → Running on http://127.0.0.1:5000
+
+Now you have TWO ways to use it:
+
+Way 1 → Open browser, go to http://127.0.0.1:5000/
+Way 2 → Double-click index.html in your Downloads folder
+
+Both look identical. Logs will tell you which one you used.
+```
+
+
+
